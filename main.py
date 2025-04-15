@@ -18,12 +18,14 @@ def parse_args():
                         help='Директория с изображениями дрона')
     parser.add_argument('--output_dir', default='data/output',
                         help='Директория для сохранения результатов')
-    parser.add_argument('--method', default='sift', choices=['sift', 'orb', 'akaze'],
+    parser.add_argument('--method', default='sift',
                         help='Метод извлечения ключевых точек')
     parser.add_argument('--smooth', action='store_true',
                         help='Применять сглаживание траектории')
     parser.add_argument('--visualize_positions', action='store_true',
                         help='Визуализировать позиции дрона на карте')
+    parser.add_argument('--view_boxes', action='store_true',
+                        help='Отображать области обзора дрона (bounding boxes)')
     return parser.parse_args()
 
 
@@ -43,7 +45,7 @@ def main():
     # Инициализация локализатора дрона
     localizer = DroneLocalizer(global_map, feature_method=args.method)
 
-    # Получение списка изображений дрона
+    # Получение списка изображений дрона, сортировка по номеру
     drone_images = sorted(
         [f for f in os.listdir(args.images_dir) if f.lower().endswith(('.png', '.jpg', '.jpeg'))],
         key=lambda name: int(name.split('_')[1].split('.')[0])
@@ -51,6 +53,12 @@ def main():
 
     if not drone_images:
         raise FileNotFoundError(f"Не найдены изображения в директории: {args.images_dir}")
+
+    # Загрузка одного изображения дрона для определения размера
+    sample_image_path = os.path.join(args.images_dir, drone_images[0])
+    sample_drone_img = cv2.imread(sample_image_path)
+    if sample_drone_img is None:
+        raise RuntimeError("Не удалось загрузить пример изображения дрона для определения размера.")
 
     # Локализация каждого изображения дрона
     positions = []
@@ -66,8 +74,6 @@ def main():
             positions.append(None)
             homographies.append(None)
             continue
-
-        # Определение позиции дрона на карте
 
         position_and_homography = localizer.locate_drone_image(drone_img)
         if position_and_homography:
@@ -95,7 +101,19 @@ def main():
         positions_image = visualizer.draw_drone_positions(positions)
         cv2.imwrite(os.path.join(args.output_dir, "positions.jpg"), positions_image)
 
+    # Опционально: отображение рамок обзора дрона
+
+    #boxes_image = visualizer.draw_drone_view_boxes(
+    #list(zip(positions, homographies)),
+    #drone_image_shape=(sample_drone_img.shape[0], sample_drone_img.shape[1])
+    #    )
+
+
+    #cv2.imwrite(os.path.join(args.output_dir, "view_boxes.jpg"), boxes_image)
+    #np.save(os.path.join(args.output_dir, "positions.npy"), positions)
+    #np.save(os.path.join(args.output_dir, "homographies.npy"), homographies)
     print(f"Результаты сохранены в директории: {args.output_dir}")
+
 
 
 if __name__ == "__main__":
