@@ -4,20 +4,32 @@ import cv2
 import numpy as np
 from PIL import Image
 from src.localization import DroneLocalizer
-import config
 
-# === Глобальные переменные ===
-map_file = None
-map_image = None
-selected_dir = None
-image_files = []
-current_index = 0
-localizer = None
-positions = []
-homographies = []
 
-# === Загрузка карты ===
+# Global variables
+map_file = None  # Path to the global map file
+map_image = None  # Loaded global map image
+selected_dir = None  # Selected directory with drone images
+image_files = []  # List of drone image files
+current_index = 0  # Index of the currently displayed image
+localizer = None  # DroneLocalizer instance
+positions = []  # List of detected drone positions
+homographies = []  # List of homography matrices
+
+
 def load_map(path):
+    """
+    Load a map image and initialize the drone localizer.
+
+    This function loads the selected map image, initializes the DroneLocalizer
+    with it, and returns the image for display in the interface.
+
+    Args:
+        path: File path to the map image
+
+    Returns:
+        PIL.Image: Loaded map image for display, or None if loading fails
+    """
     global map_file, map_image, localizer
     map_file = path.name
     map_image = cv2.imread(map_file)
@@ -26,12 +38,25 @@ def load_map(path):
     localizer = DroneLocalizer(map_image, feature_method="sift")
     return Image.fromarray(cv2.cvtColor(map_image, cv2.COLOR_BGR2RGB))
 
-# === Выбор папки с кадрами ===
+
 def select_folder(folder):
+    """
+    Select a folder containing drone images.
+
+    This function loads the list of image files from the selected folder,
+    initializes arrays for positions and homographies, and displays the first image.
+
+    Args:
+        folder: Path to the folder containing drone images
+
+    Returns:
+        tuple: (crop_image, filename, map_with_box) for the first image,
+               or error message if the folder is invalid
+    """
     global selected_dir, image_files, current_index, positions, homographies
 
     if not os.path.isdir(folder):
-        return None, "Папка не найдена", None
+        return None, "Folder not found", None
 
     selected_dir = folder
     current_index = 0
@@ -44,45 +69,57 @@ def select_folder(folder):
 
     if image_files:
         return show_crop_and_box(current_index)
-    return None, "Нет изображений в папке", None
+    return None, "No images in folder", None
 
-# === Отрисовка кадра + прямоугольника на карте ===
+
 def draw_selected_box_on_trajectory(index):
+    """
+    Draw a bounding box for the selected drone image on the trajectory/map.
+
+    This function localizes the drone image on the map (if not already done),
+    and draws a yellow rectangle showing the drone's field of view on the map.
+
+    Args:
+        index: Index of the drone image to display
+
+    Returns:
+        PIL.Image: Map image with the drone's field of view rectangle
+    """
     global localizer, map_image, positions, homographies, image_files
 
-    # Проверка: загружена ли карта
+    # Check if map is loaded
     if map_image is None:
-        print("Глобальная карта не загружена. Сначала загрузите карту.")
+        print("Global map not loaded. Please load a map first.")
         return None
 
-    # Проверка: инициализирован ли локализатор
+    # Check if localizer is initialized
     if localizer is None:
-        print("Локализатор не инициализирован.")
+        print("Localizer not initialized.")
         return None
 
-    # Попробуем загрузить trajectory.jpg
+    # Try to load trajectory.jpg
     trajectory_path = "data/output/trajectory.jpg"
     if os.path.exists(trajectory_path):
         trajectory = cv2.imread(trajectory_path)
     else:
-        trajectory = map_image.copy()  # безопасно, т.к. проверили выше
+        trajectory = map_image.copy()  # Safe since we checked above
 
     filename = os.path.join(selected_dir, image_files[index])
     drone_img = cv2.imread(filename)
     if drone_img is None:
-        print(f"Не удалось загрузить изображение дрона: {filename}")
+        print(f"Failed to load drone image: {filename}")
         return Image.fromarray(cv2.cvtColor(trajectory, cv2.COLOR_BGR2RGB))
 
-    # Если позиция и гомография ещё не посчитаны — считаем
+    # If position and homography not yet calculated - calculate them
     if positions[index] is None or homographies[index] is None:
         result = localizer.locate_drone_image(drone_img)
         if result:
             positions[index], homographies[index] = result
         else:
-            print(f"Не удалось локализовать изображение: {filename}")
+            print(f"Failed to localize image: {filename}")
             return Image.fromarray(cv2.cvtColor(trajectory, cv2.COLOR_BGR2RGB))
 
-    # Рисуем прямоугольник обзора дрона
+    # Draw drone's field of view rectangle
     h, w = drone_img.shape[:2]
     corners = np.float32([[0, 0], [w, 0], [w, h], [0, h]]).reshape(-1, 1, 2)
     projected = cv2.perspectiveTransform(corners, homographies[index])
@@ -92,37 +129,73 @@ def draw_selected_box_on_trajectory(index):
     return Image.fromarray(cv2.cvtColor(trajectory, cv2.COLOR_BGR2RGB))
 
 
-# === Показ текущего кадра + карта ===
 def show_crop_and_box(index):
+    """
+    Display the current drone image and its position on the map.
+
+    Args:
+        index: Index of the image to display
+
+    Returns:
+        tuple: (crop_image, filename, map_with_box) for display in the interface
+    """
     path = os.path.join(selected_dir, image_files[index])
     crop = Image.open(path)
     map_with_box = draw_selected_box_on_trajectory(index)
     return crop, image_files[index], map_with_box
 
-# === Переключение кадров ===
+
 def next_crop():
+    """
+    Show the next drone image in the sequence.
+
+    Returns:
+        tuple: (crop_image, filename, map_with_box) for the next image
+    """
     global current_index
     if image_files:
         current_index = (current_index + 1) % len(image_files)
         return show_crop_and_box(current_index)
     return None, "", None
 
+
 def prev_crop():
+    """
+    Show the previous drone image in the sequence.
+
+    Returns:
+        tuple: (crop_image, filename, map_with_box) for the previous image
+    """
     global current_index
     if image_files:
         current_index = (current_index - 1) % len(image_files)
         return show_crop_and_box(current_index)
     return None, "", None
 
-# === Запуск main.py (траектория) ===
+
 def run_main():
+    """
+    Run the main trajectory reconstruction process.
+
+    Executes the main.py script with the currently selected map and image folder,
+    then loads and returns the resulting trajectory image.
+
+    Returns:
+        PIL.Image: The generated trajectory image
+    """
     if map_file and selected_dir:
         os.system(f"python main.py --map \"{map_file}\" --images_dir \"{selected_dir}\" --output_dir \"data/output\"")
         return Image.open("data/output/trajectory.jpg")
     return None
 
-# === Очистка ===
+
 def clear_all():
+    """
+    Clear all loaded data and reset the interface.
+
+    Returns:
+        tuple: Empty values for the interface elements
+    """
     global map_file, map_image, selected_dir, image_files, current_index, localizer, positions, homographies
     map_file = None
     map_image = None
@@ -134,9 +207,10 @@ def clear_all():
     homographies = []
     return None, None, "", None
 
-# === Интерфейс Gradio ===
+
+# Gradio interface realization
 with gr.Blocks() as demo:
-    gr.Markdown("# Drone Navigation Gradio Interface")
+    gr.Markdown("# Zatulovskyi - Task 2: Classic CV - Drone navigation")
 
     with gr.Row():
         map_output = gr.Image(label="Map / Trajectory")
